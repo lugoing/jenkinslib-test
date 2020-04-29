@@ -1,105 +1,104 @@
 #!groovy
+
 @Library('jenkinslib-test') _
 
 def tools = new org.devops.tools()
 
 
-//Getcode
-String srcUrl = "${env.srcUrl}".trim()
-String srcType = "${env.srcType}".trim()
-String branchName = "${env.branchName}".trim()
-String tagName = "${env.tagName}".trim()
-String moduleName = "${env.moduleName}".trim()
 
-//Global 
 String workspace = "/opt/jenkins/workspace"
-String targetHosts = "${env.targetHosts}".trim()
-String jobType = "${JOB_NAME}".split('_')[-1]
-String credentialsId = "24982560-17fc-4589-819b-bc5bea89da77"
-String serviceName = "${env.serviceName}".trim()
-String javaVersion = "${env.javaVersion}".trim()
-String dependency = "${env.dependency}".trim()
-String port = "${env.port}".trim()
-String user = "${env.user}".trim()
-String targetDir = "${env.targetDir}".trim()
-def runserver 
-def buildDir = tools.BuildDir(workspace,srcType,tagName,moduleName)[0]  
-def srcDir = tools.BuildDir(workspace,srcType,tagName,moduleName)[1]  
-
-//Build
-String midwareType = "${env.midwareType}".trim()
-String buildType = "${env.buildType}".trim()
-String buildShell = "${env.buildShell}".trim()
 
 //Pipeline
-
-ansiColor('xterm') {
-    node("master"){
-        ws("${workspace}") {
-            //Getcode
-            stage("GetCode"){
-                tools.PrintMes('获取代码','green')
-                try {
-                    def getcode = new org.devops.getcode()
-                    getcode.GetCode(srcType,srcUrl,tagName,branchName,credentialsId)
-                } catch(e){
-                
-                }    
+pipeline {
+    agent { node {  label "master"   //指定运行节点的标签或者名称
+                    customWorkspace "${workspace}"   //指定运行工作目录（可选）
             }
-            
-            //Build
-            stage("RunBuild"){
-                tools.PrintMes('应用打包','green')
-                def build = new org.devops.build()
-        
-                try {
-                    if ("${midwareType}" == "Nginx"){
-                        build.WebBuild(srcDir,serviceName)
-                    
-                    } else if ("${midwareType}" == "NodeJs"){
-                        def webDist=srcDir + '/dist'
-                        sh " cd ${srcDir} && ${buildShell} && cd -"
-                        build.WebBuild(webDist,serviceName)
-                    }
-                    else {
-                        build.Build(javaVersion,buildType,buildDir,buildShell)
-                    }
-                }catch(e){
-                    currentBuild.description='运行打包失败！'
-                    error '运行打包失败！'
-                }
-            }
-            
-            
-            //Deploy
-            stage("RunDeploy"){
-                tools.PrintMes('发布应用','green')
-                def deploy = new org.devops.deploy()
-                
-                switch("${midwareType}"){
-                    case 'SpringBoot':
-                        deploy.SpringBootInit(javaOption,dependency,credentialsId)
-                        deploy.JavaDeploy('SpringBoot','jar',srcDir,user,targetHosts,targetDir+"/${serviceName}",port)
-                        break;
-                        
-                    case 'Tomcat':
-                        def tomcatDir=targetDir + "/${port}/webapps/"
-                        deploy.JavaDeploy('Tomcat','war',srcDir,user,targetHosts,tomcatDir,port)
-                        break;
-                        
-                    case 'NodeJs':
-                        deploy.WebDeploy(user,serviceName,targetDir)
-                        break;
+    }
 
-                    case 'Nginx': 
-                        deploy.WebDeploy(user,serviceName,targetDir)
-                        break;
+    options {
+        timestamps()  //日志会有时间
+        skipDefaultCheckout()  //删除隐式checkout scm语句
+        disableConcurrentBuilds() //禁止并行
+        timeout(time: 1, unit: 'HOURS')  //流水线超时设置1h
+    }
 
-                    default:
-                        error "中间件类型错误!"  
+    stages {
+        //下载代码
+        stage("GetCode"){ //阶段名称
+            when { environment name: 'test', value: 'abcd' }
+            steps{  //步骤
+                timeout(time:5, unit:"MINUTES"){   //步骤超时时间
+                    script{ //填写运行代码
+                        println('获取代码')
+                        tools.PrintMes("获取代码",'green')
+                        println("${test}")
+                        
+                        input id: 'Test', message: '我们是否要继续？', ok: '是，继续吧！', parameters: [choice(choices: ['a', 'b'], description: '', name: 'test1')], submitter: 'lizeyang,admin'
+                    }
                 }
             }
         }
-    
+
+        stage("01"){
+            failFast true
+            parallel {
+        
+                //构建
+                stage("Build"){
+                    steps{
+                        timeout(time:20, unit:"MINUTES"){
+                            script{
+                                println('应用打包')
+                                tools.PrintMes("应用打包",'green')
+                                mvnHome = tool "m2"
+                                println(mvnHome)
+                                
+                                sh "${mvnHome}/bin/mvn --version"
+                            }
+                        }
+                    }
+                }
+        
+                //代码扫描
+                stage("CodeScan"){
+                    steps{
+                        timeout(time:30, unit:"MINUTES"){
+                            script{
+                                print("代码扫描")
+                                tools.PrintMes("代码扫描",'green')
+                                
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    //构建后操作
+    post {
+        always {
+            script{
+                println("always")
+            }
+        }
+
+        success {
+            script{
+                currentBuild.description = "\n 构建成功!" 
+            }
+        }
+
+        failure {
+            script{
+                currentBuild.description = "\n 构建失败!" 
+            }
+        }
+
+        aborted {
+            script{
+                currentBuild.description = "\n 构建取消!" 
+            }
+        }
     }
 }
